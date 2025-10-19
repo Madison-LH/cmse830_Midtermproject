@@ -216,7 +216,7 @@ stabilize downstream clustering.
 """)
 
     st.code(r"""
-# R (in your pipeline)
+# R 
 # 1) Select numeric acoustic features and scale
 Z <- scale(as.matrix(features_numeric))
 
@@ -229,14 +229,6 @@ Zp <- pca$x[, 1:min(PCS, ncol(pca$x)), drop = FALSE]
 """, language="r")
     st.markdown("<div class='code-caption'>We fix the number of PCs to reduce run-to-run variance and keep the GMM search well-conditioned.</div>", unsafe_allow_html=True)
 
-    st.subheader("Alternative DR methods (when and why)")
-    st.markdown("""
-- **t-SNE** (nonlinear, good for visualization; not ideal as input to parametric clustering).
-- **UMAP** (preserves local/global structure; useful for exploratory plots; also nonlinear).
-- **PCA + Whitening** (optional): sometimes improves spherical clustering methods.
-
-**Recommendation for this project:** keep **PCA for clustering** (inputs to GMM) and use **UMAP/t-SNE only for visualization** so cluster assignments remain stable and reproducible.
-""")
 
 # Tab 5: Imputation
 with tabs[4]:
@@ -246,7 +238,7 @@ with tabs[4]:
 **Why impute?** Acoustic extraction can produce missing values (short/noisy calls, measurement failures).
 Imputing before PCA/clustering avoids dropping rows and stabilizes components.
 
-**Current approach in your R script:** simple **median imputation** per feature.
+**Current approach in my R script:** simple **median imputation** per feature.
 """)
 
     st.code(r"""
@@ -263,7 +255,7 @@ Z <- scale(as.matrix(X))
 """, language="r")
     st.markdown("<div class='code-caption'>Median is robust and simple, but ignores correlations among features.</div>", unsafe_allow_html=True)
 
-    st.subheader("Stronger options (drop-in ideas)")
+    st.subheader("Stronger options (possible future directions)")
     st.markdown("""
 - **KNN imputation**: fills a call’s missing values from acoustically similar calls.
 - **Iterative (multivariate) imputation**: models each feature using the others (regression-style).
@@ -271,47 +263,6 @@ Z <- scale(as.matrix(X))
 - **MICE**: multiple imputations with predictive mean matching (good with mixed distributions).
 """)
 
-    st.code(r"""
-# R: PCA-based imputation (missMDA)
-library(missMDA)
-acoustic <- as.data.frame(features_numeric)
-ncp_est <- estim_ncpPCA(acoustic)     # estimate number of components
-imp <- imputePCA(acoustic, ncp = ncp_est$ncp)
-X_imp <- imp$completeObs               # use this for PCA/GMM
-""", language="r")
-    st.markdown("<div class='code-caption'>Keeps imputations consistent with the PCA structure used for clustering.</div>", unsafe_allow_html=True)
-
-    st.code(r"""
-# R: MICE (predictive mean matching)
-library(mice)
-imp <- mice(acoustic, m = 1, method = "pmm", maxit = 5, seed = 123)
-X_imp <- complete(imp)
-""", language="r")
-    st.markdown("<div class='code-caption'>Captures nonlinear relations via predictive mean matching; set m>1 for multiple imputations.</div>", unsafe_allow_html=True)
-
-    st.code(r"""
-# Python: KNN and Iterative imputation (if you port this step)
-from sklearn.impute import KNNImputer
-from sklearn.experimental import enable_iterative_imputer  # noqa
-from sklearn.impute import IterativeImputer
-import numpy as np
-
-X = features_numeric.values  # numpy array
-knn = KNNImputer(n_neighbors=5)
-X_knn = knn.fit_transform(X)
-
-it = IterativeImputer(random_state=123)
-X_iter = it.fit_transform(X)
-""", language="python")
-    st.markdown("<div class='code-caption'>Use KNN when neighbors are meaningful; Iterative when linear-ish relations hold.</div>", unsafe_allow_html=True)
-
-    st.subheader("Practical guidance")
-    st.markdown("""
-- Start with **median** (baseline), then try **missMDA** or **KNN** and compare:
-  - PCA variance explained, GMM BIC, and cluster separability plots.
-- Keep **the same imputation strategy** across runs for reproducibility.
-- Document the chosen method in your Methods section.
-""")
 
 # Tab 6: Repro Tips
 with tabs[5]:
