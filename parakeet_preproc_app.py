@@ -408,30 +408,28 @@ Zp <- pca$x[, 1:min(PCS, ncol(pca$x)), drop = FALSE]
         st.warning(f"Interactive embeddings not available yet: {e}")
 
     st.markdown("---")
-    st.subheader("PCA Cluster Plots (Old vs New)")
+    st.subheader("Original vs new cluster plots")
 
-col1, col2 = st.columns(2)
+    st.markdown("**Original cluster plots (repeated here for comparison):**")
 
-with col1:
-    try:
-        img = load_image_url(_join(BASE_URL, EXPECTED["img_pca_old"]))
-        st.image(img, caption="Old PCA cluster plot")
-    except Exception as e:
-        st.error(f"Failed to load old PCA plot: {e}")
+    cols_old = st.columns(2)
+    with cols_old[0]:
+        try:
+            img = load_image_url(_join(BASE_URL, EXPECTED["img_pca"]))
+            st.image(img, caption="OLD: PCA clusters (PC1 vs PC2)")
+        except Exception as e:
+            st.error(f"Failed to load {EXPECTED['img_pca']}: {e}")
+    with cols_old[1]:
+        try:
+            img = load_image_url(_join(BASE_URL, EXPECTED["img_thresh"]))
+            st.image(img, caption="OLD: cluster composition (≥80% vs <80%)")
+        except Exception as e:
+            st.error(f"Failed to load {EXPECTED['img_thresh']}: {e}")
 
-with col2:
-    try:
-        img = load_image_url(_join(BASE_URL, EXPECTED["img_pca_new"]))
-        st.image(img, caption="New PCA cluster plot (updated version)")
-    except Exception as e:
-        st.error(f"Failed to load new PCA plot: {e}")
-
-    st.markdown("""
-**Why two PCA cluster plots?**
-
-- The **old plot** reflects the earlier dataset size and earlier clustering assumptions.
-- The **new plot** uses the **expanded dataset**, **fixed PCA components**, and **GMM search across 2–8 clusters**, revealing a **stable 6-cluster acoustic structure**.
-""")
+    st.markdown(
+        "<div class='small'>These are the same plots as in the Results tab — kept here so you can compare them directly to the new diagnostics below.</div>",
+        unsafe_allow_html=True
+    )
 
     st.markdown("**New cluster diagnostics added in this run:**")
 
