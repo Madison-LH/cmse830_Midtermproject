@@ -3,13 +3,16 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 import streamlit as st
+import altair as alt
 
 st.set_page_config(
     page_title="Parakeet Call Preprocessing • Explainer & Dashboard",
     layout="wide"
 )
 
-# Styling 
+# ------------------------------------------------------------------
+# Styling
+# ------------------------------------------------------------------
 st.markdown("""
 <style>
 .small { font-size:0.9rem; line-height:1.35; }
@@ -17,24 +20,41 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Hardcoded GitHub results base
+# ------------------------------------------------------------------
+# Data locations
+# ------------------------------------------------------------------
 BASE_URL = "https://raw.githubusercontent.com/Madison-LH/cmse830_Midtermproject/refs/heads/main/results/"
 
-# Expected filenames
+# Expected filenames (old + new cluster plots)
 EXPECTED = {
     "feat": "acoustic_features_with_contact_posteriors.csv",
     "flags": "contact_posterior_flags.csv",
     "ici": "contact_intercall_intervals.csv",
     "sr": "wav_samplerate_summary.csv",
+
+    # old plots
     "img_dur_peak": "duration_vs_peakfreq.png",
     "img_pca": "cluster_pca_pc1_pc2.png",
     "img_thresh": "cluster_threshold_counts.png",
+
+    # new cluster / embedding plots
+    "img_coassoc": "cluster_coassociation_heatmap.png",
+    "img_clustergram": "clustergram_gmm_vs_kmeans.png",
+    "img_importance": "cluster_feature_importance.png",
+    "img_tsne_clusters": "embedding_tsne_clusters.png",
+    "img_tsne_calltype": "embedding_tsne_calltype.png",
+    "img_umap_clusters": "embedding_umap_clusters.png",
+    "img_umap_calltype": "embedding_umap_calltype.png",
+
+    # interactive embeddings table
+    "embed": "embeddings_for_streamlit.csv",
 }
 
-# Helper functions
+
 def _join(base: str, name: str) -> str:
     base = base.strip()
     return base + name if base.endswith("/") else base + "/" + name
+
 
 @st.cache_data(show_spinner=False)
 def load_csv_url(url: str) -> pd.DataFrame:
@@ -42,116 +62,168 @@ def load_csv_url(url: str) -> pd.DataFrame:
     r.raise_for_status()
     return pd.read_csv(io.BytesIO(r.content))
 
+
 @st.cache_data(show_spinner=False)
 def load_image_url(url: str) -> bytes:
     r = requests.get(url, timeout=30)
     r.raise_for_status()
     return r.content
 
+
+# ------------------------------------------------------------------
 # Header
+# ------------------------------------------------------------------
 st.title("🐦 Parakeet Call Preprocessing — Explainer & Results Dashboard")
 
 st.markdown(f"""
 This app **explains** the parakeet call preprocessing pipeline and visualizes outputs
-fetched automatically from:
+fetched from:
 
 > [{BASE_URL}]({BASE_URL})
 """)
 
-# Overview
-with st.expander("🎯 Research Aim & Pipeline Overview", expanded=True):
-    st.subheader("Goal")
-    st.markdown("""
-Build a reproducible workflow to:
-- Read **Raven selection tables** and match them to `.wav` files  
-- Join **recording** and **call metadata**  
-- Filter low-quality or noisy calls  
-- Extract **acoustic features**  
-- Use **unsupervised clustering** to identify contact-call groups
-""")
-
-    st.graphviz_chart("""
-    digraph G {
-      rankdir=LR; node [shape=box, style="rounded,filled", fillcolor="#F5F7FB"];
-      A[label="1) Read Raven tables (*.txt) + map to .wav"];
-      B[label="2) Join metadata + filter quality/noise"];
-      C[label="3) Build EST (warbleR)"];
-      D[label="4) Standardize metadata"];
-      E[label="5) Extract acoustic features"];
-      F[label="6) IDA/EDA plots"];
-      G[label="7) PCA → GMM clustering"];
-      H[label="8) Export contact-call set"];
-      A->B->C->D->E->F->G->H;
-    }
-    """)
-
-    st.code(r"""
-# Example R outline
-raven_df <- readr::read_delim("*.txt", delim="\t") |>
-  dplyr::mutate(call_uid = paste0(sound.files, "__", selec))
-
-sel_meta <- raven_df |>
-  dplyr::left_join(call_df, by="call_uid") |>
-  dplyr::filter(call_quality %in% c("high","medium"),
-                background_noise == FALSE)
-
-est <- warbleR::extended_selection_table(X = sel_meta, path = AUDIO_DIR)
-meas <- warbleR::spectro_analysis(X = est, img = FALSE)
-""", language="r")
-
+# ------------------------------------------------------------------
 # Tabs
+# ------------------------------------------------------------------
 tabs = st.tabs([
     "Purpose & Design",
+    "Dataset & Scaling",
     "IDA & EDA",
-    "Results",
-    "Dimensionality Reduction",
+    "Results (old cluster plots)",
+    "Dimensionality Reduction & New Cluster Plots",
     "Imputation",
     "Repro Tips"
 ])
 
+# ------------------------------------------------------------------
 # Tab 1: Purpose & Design
-
+# ------------------------------------------------------------------
 with tabs[0]:
     st.header("Purpose & Design")
+
     st.markdown("""
-**Why this pipeline?**
-- Ensure *reproducibility*  
-- Perform *standardized acoustic extraction*  
-- Enable *data-driven discovery* of contact-call clusters
+**Goal:**  
+Build a reproducible pipeline that:
+
+- Reads **Raven selection tables** and matches them to `.wav` files  
+- Joins call-level and recording-level metadata  
+- Filters low-quality / noisy calls early  
+- Extracts standardized **acoustic features**  
+- Uses **unsupervised clustering** to identify contact-call groups
 """)
 
-    st.subheader("Key Steps")
+    st.subheader("Pipeline overview")
+    st.graphviz_chart("""
+    digraph G {
+      rankdir=LR; node [shape=box, style="rounded,filled", fillcolor="#F5F7FB"];
+      A[label="1) Read Raven tables + map to .wav"];
+      B[label="2) Join metadata & filter quality/noise"];
+      C[label="3) Build EST (warbleR)"];
+      D[label="4) Standardization checks"];
+      E[label="5) Extract acoustic features"];
+      F[label="6) Plot / unsupervised clustering"];
+      G[label="7) Export contact-call set"];
+      A->B->C->D->E->F->G;
+    }
+    """)
+
+    st.subheader("Key step example")
     st.code(r"""
 # Filter by call quality & background noise
 call_df <- call_df |>
   dplyr::filter(call_quality %in% c("high","medium"),
                 background_noise == FALSE)
 """, language="r")
-    st.markdown("<div class='small'>Filtering early prevents noisy or poor-quality calls from biasing later analyses.</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='small'>Filtering early prevents noisy/poor calls from distorting PCA and clustering downstream.</div>",
+        unsafe_allow_html=True
+    )
 
-# Tab 2: IDA & EDA
+# ------------------------------------------------------------------
+# Tab 2: Dataset & Scaling
+# ------------------------------------------------------------------
 with tabs[1]:
+    st.header("Dataset & Scaling")
+
+    st.markdown("""
+### Each call is its own mini-dataset
+
+For every call we extract a **vector of acoustic features**, including:
+
+- Dominant frequency statistics (mean, median, quartiles)  
+- Peak frequency and bandwidth  
+- Duration and temporal quartiles  
+- Spectral and temporal entropy  
+
+So each row in the feature table is like a tiny dataset summarizing one call's
+time–frequency structure.
+""")
+
+    try:
+        feat_df_ds = load_csv_url(_join(BASE_URL, EXPECTED["feat"]))
+        n_calls = len(feat_df_ds)
+        n_numeric = feat_df_ds.select_dtypes("number").shape[1]
+        n_clusters = feat_df_ds["cluster_unsup"].nunique(dropna=True)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Number of call observations", f"{n_calls}")
+        c2.metric("Numeric features per call", f"{n_numeric}")
+        c3.metric("GMM clusters", f"{n_clusters}")
+
+        st.markdown(
+            f"""
+Earlier runs used a much smaller number of calls.  
+In this **scaled-up run** there are **over 27 different calls** and in total
+**{n_calls} call-level observations**, each with **{n_numeric} acoustic features**.
+The larger dataset lets the Gaussian mixture model stably resolve **six clusters**
+instead of just a coarse split.
+"""
+        )
+
+    except Exception as e:
+        st.error(f"Failed to load {EXPECTED['feat']} for dataset summary: {e}")
+
+    st.markdown("""
+### What changed vs earlier versions?
+
+- More recordings and calls were included after quality/noise filtering.  
+- All numeric features were **z-scored** before PCA/clustering.  
+- The GMM search range for number of clusters was widened (e.g. 2–8),
+  which now supports a six-cluster solution.
+""")
+
+# ------------------------------------------------------------------
+# Tab 3: IDA & EDA
+# ------------------------------------------------------------------
+with tabs[2]:
     st.header("Initial & Exploratory Data Analysis")
 
-    # --- Samplerate Summary ---
-    st.subheader("Samplerate Consistency")
+    # Samplerate consistency
+    st.subheader("Samplerate consistency across WAVs")
     try:
         df_sr = load_csv_url(_join(BASE_URL, EXPECTED["sr"]))
         st.dataframe(df_sr)
-        st.markdown("<div class='small'>All recordings should share the same sample rate to avoid feature drift.</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='small'>Uniform sample rates ensure that spectrogram parameters mean the same thing across files.</div>",
+            unsafe_allow_html=True
+        )
     except Exception as e:
         st.error(f"Failed to load {EXPECTED['sr']}: {e}")
 
-    # --- Duration vs Peak Frequency ---
-    st.subheader("Duration vs Peak Frequency")
+    # Duration vs peak frequency
+    st.subheader("Duration vs peak frequency")
     try:
         img = load_image_url(_join(BASE_URL, EXPECTED["img_dur_peak"]))
-        st.image(img, caption="Duration (s) vs Peak frequency (kHz)")
+        st.image(img, caption="Scatter: call duration (s) vs peak frequency (kHz)")
+        st.markdown(
+            "<div class='small'>Distinct clouds suggest different call families even before clustering.</div>",
+            unsafe_allow_html=True
+        )
     except Exception as e:
         st.error(f"Failed to load {EXPECTED['img_dur_peak']}: {e}")
 
-    # --- Inter-Call Intervals (ICIs) ---
-    st.subheader("Inter-Call Intervals (ICIs)")
+    # Inter-call intervals
+    st.subheader("Inter-call intervals (ICIs) for contact-like calls")
     try:
         ici_df = load_csv_url(_join(BASE_URL, EXPECTED["ici"]))
         if "ici_sec" in ici_df.columns:
@@ -160,89 +232,284 @@ with tabs[1]:
             ax.set_xlabel("ICI (s)")
             ax.set_ylabel("Count")
             st.pyplot(fig)
-            st.markdown("<div class='small'>ICI histograms show rhythmic patterns of contact calling; multiple peaks can indicate context or individual differences.</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='small'>ICI distributions show calling rhythm; multiple modes can reflect different behavioral contexts or individuals.</div>",
+                unsafe_allow_html=True
+            )
     except Exception as e:
         st.error(f"Failed to load {EXPECTED['ici']}: {e}")
 
-# Tab 3: Results
-with tabs[2]:
-    st.header("Results & Clustering Outcomes")
+# ------------------------------------------------------------------
+# Tab 4: Results (old cluster plots)
+# ------------------------------------------------------------------
+with tabs[3]:
+    st.header("Results & Clustering Outcomes (original plots)")
 
-    # Flags / contact probabilities
+    # Posterior flags
     try:
         flags_df = load_csv_url(_join(BASE_URL, EXPECTED["flags"]))
         st.dataframe(flags_df.head(100))
         if "contact_thresh_pass" in flags_df.columns:
             pct = 100 * flags_df["contact_thresh_pass"].fillna(False).astype(bool).mean()
-            st.markdown(f"**{pct:.1f}% of calls passed the ≥0.80 contact threshold.**")
+            st.markdown(f"**{pct:.1f}% of calls passed the ≥0.80 contact posterior threshold.**")
     except Exception as e:
         st.error(f"Failed to load {EXPECTED['flags']}: {e}")
 
-    # Cluster plots
+    st.subheader("Original cluster plots")
+
     cols = st.columns(2)
     with cols[0]:
         try:
             img = load_image_url(_join(BASE_URL, EXPECTED["img_pca"]))
-            st.image(img, caption="PCA clusters (PC1 vs PC2)")
+            st.image(img, caption="OLD: PCA clusters (PC1 vs PC2)")
         except Exception as e:
             st.error(f"Failed to load {EXPECTED['img_pca']}: {e}")
     with cols[1]:
         try:
             img = load_image_url(_join(BASE_URL, EXPECTED["img_thresh"]))
-            st.image(img, caption="Cluster composition (≥80% vs <80%)")
+            st.image(img, caption="OLD: cluster composition (≥80% vs <80%)")
         except Exception as e:
             st.error(f"Failed to load {EXPECTED['img_thresh']}: {e}")
 
+    st.markdown(
+        "<div class='small'>These are the original cluster plots from the earlier version of the pipeline: a PCA scatter and a bar plot showing how many calls per cluster pass the contact threshold.</div>",
+        unsafe_allow_html=True
+    )
+
     st.markdown("---")
-    st.subheader("Full Features with Posteriors")
+    st.subheader("Feature table with posteriors")
     try:
         feat_df = load_csv_url(_join(BASE_URL, EXPECTED["feat"]))
         st.dataframe(feat_df.head(200))
     except Exception as e:
         st.error(f"Failed to load {EXPECTED['feat']}: {e}")
 
-# Tab 4: Dimensionality Reduction
-with tabs[3]:
-    st.header("Dimensionality Reduction Techniques Used")
+# ------------------------------------------------------------------
+# Tab 5: Dimensionality Reduction & NEW cluster plots
+# ------------------------------------------------------------------
+with tabs[4]:
+    st.header("Dimensionality Reduction & New Cluster Diagnostics")
 
     st.markdown("""
-**Goal:** compress correlated acoustic features into a small number of informative axes that
-stabilize downstream clustering.
+We compress correlated acoustic features into a smaller number of dimensions and
+then examine cluster structure in several ways.
 
-**Primary method: PCA (Principal Component Analysis)**
-- Works on the correlation structure to produce orthogonal components.
-- We retain a small, fixed number of PCs (e.g., 2–3) to keep runs reproducible and avoid overfitting GMMs.
-- PCA is linear, fast, and easy to interpret (loadings show which features drive each PC).
+This run uses:
+
+- **PCA** for linear dimensionality reduction  
+- **t-SNE** and **UMAP** for nonlinear embeddings  
+- **Repeated GMM runs** for stability (co-association)  
+- A **random forest** to rank which features best separate clusters
 """)
 
+    st.subheader("PCA in the R pipeline (fixed PC count)")
     st.code(r"""
-# R 
-# 1) Select numeric acoustic features and scale
+# R sketch
 Z <- scale(as.matrix(features_numeric))
-
-# 2) PCA
 pca <- prcomp(Z, center = FALSE, scale. = FALSE)
 
-# 3) Keep a fixed number of PCs for stability (e.g., 3)
 PCS <- 3
 Zp <- pca$x[, 1:min(PCS, ncol(pca$x)), drop = FALSE]
 """, language="r")
-    st.markdown("<div class='code-caption'>We fix the number of PCs to reduce run-to-run variance and keep the GMM search well-conditioned.</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='code-caption'>We fix the number of principal components (e.g. 3) to keep the GMM search well-conditioned and comparable across runs.</div>",
+        unsafe_allow_html=True
+    )
 
+    # ------------------ Interactive embeddings ------------------
+    st.subheader("Interactive embedding explorer")
 
-# Tab 5: Imputation
-with tabs[4]:
+    try:
+        embed_df = load_csv_url(_join(BASE_URL, EXPECTED["embed"]))
+        df = embed_df.copy()
+
+        if "cluster" in df.columns:
+            df["cluster"] = df["cluster"].astype("Int64")
+            df["cluster_label"] = df["cluster"].map(
+                lambda c: f"C{int(c)}" if pd.notnull(c) else None
+            )
+
+        c1, c2, c3 = st.columns(3)
+        emb_choice = c1.selectbox(
+            "Embedding space",
+            ["PCA (PC1 vs PC2)", "t-SNE (1 vs 2)", "UMAP (1 vs 2)"]
+        )
+        color_choice = c2.selectbox(
+            "Color by",
+            ["Cluster", "Call type", "P(contact)", "Contact ≥ 0.8?"]
+        )
+        size_choice = c3.selectbox(
+            "Point size",
+            ["Small", "Medium", "Large"],
+            index=1
+        )
+        size_map = {"Small": 30, "Medium": 60, "Large": 100}
+        point_size = size_map[size_choice]
+
+        if emb_choice.startswith("PCA"):
+            x_col, y_col = "PC1", "PC2"
+        elif emb_choice.startswith("t-SNE"):
+            x_col, y_col = "TSNE1", "TSNE2"
+        else:
+            x_col, y_col = "UMAP1", "UMAP2"
+
+        missing = [c for c in (x_col, y_col) if c not in df.columns]
+        if missing:
+            st.warning(f"Embedding columns {missing} are missing in {EXPECTED['embed']}.")
+        else:
+            if color_choice == "Cluster":
+                color_enc = alt.Color("cluster_label:N", title="Cluster")
+            elif color_choice == "Call type":
+                color_enc = alt.Color("call_type:N", title="Call type")
+            elif color_choice == "P(contact)":
+                color_enc = alt.Color(
+                    "p_contact:Q",
+                    title="P(contact cluster)",
+                    scale=alt.Scale(scheme="viridis")
+                )
+            else:
+                df["contact_flag"] = df["contact_thresh_pass"].map(
+                    lambda v: "≥ 0.8" if bool(v) else "< 0.8"
+                )
+                color_enc = alt.Color("contact_flag:N", title="Contact posterior")
+
+            tooltip = [
+                "call_uid",
+                "sound.files",
+                "call_type",
+                "cluster_label",
+                alt.Tooltip("p_contact:Q", format=".2f"),
+            ]
+
+            chart = (
+                alt.Chart(df)
+                .mark_circle(size=point_size, opacity=0.8)
+                .encode(
+                    x=alt.X(f"{x_col}:Q", title=x_col),
+                    y=alt.Y(f"{y_col}:Q", title=y_col),
+                    color=color_enc,
+                    tooltip=tooltip,
+                )
+                .properties(height=550)
+                .interactive()
+            )
+            st.altair_chart(chart, use_container_width=True)
+
+        st.markdown("""
+**How to interpret this:**
+
+- Each point is a single call plotted in PCA, t-SNE, or UMAP space.  
+- You can color by unsupervised cluster, metadata call_type, or contact posterior.  
+- The interactive view lets you inspect individual calls via tooltips.
+""")
+
+    except Exception as e:
+        st.warning(f"Interactive embeddings not available yet: {e}")
+
+    st.markdown("---")
+    st.subheader("Original vs new cluster plots")
+
+    st.markdown("**Original cluster plots (repeated here for comparison):**")
+
+    cols_old = st.columns(2)
+    with cols_old[0]:
+        try:
+            img = load_image_url(_join(BASE_URL, EXPECTED["img_pca"]))
+            st.image(img, caption="OLD: PCA clusters (PC1 vs PC2)")
+        except Exception as e:
+            st.error(f"Failed to load {EXPECTED['img_pca']}: {e}")
+    with cols_old[1]:
+        try:
+            img = load_image_url(_join(BASE_URL, EXPECTED["img_thresh"]))
+            st.image(img, caption="OLD: cluster composition (≥80% vs <80%)")
+        except Exception as e:
+            st.error(f"Failed to load {EXPECTED['img_thresh']}: {e}")
+
+    st.markdown(
+        "<div class='small'>These are the same plots as in the Results tab — kept here so you can compare them directly to the new diagnostics below.</div>",
+        unsafe_allow_html=True
+    )
+
+    st.markdown("**New cluster diagnostics added in this run:**")
+
+    # t-SNE plots
+    cols_tsne = st.columns(2)
+    with cols_tsne[0]:
+        try:
+            img = load_image_url(_join(BASE_URL, EXPECTED["img_tsne_clusters"]))
+            st.image(img, caption="NEW: t-SNE embedding colored by cluster")
+        except Exception as e:
+            st.error(f"Failed to load {EXPECTED['img_tsne_clusters']}: {e}")
+    with cols_tsne[1]:
+        try:
+            img = load_image_url(_join(BASE_URL, EXPECTED["img_tsne_calltype"]))
+            st.image(img, caption="NEW: t-SNE embedding colored by call_type")
+        except Exception as e:
+            st.error(f"Failed to load {EXPECTED['img_tsne_calltype']}: {e}")
+
+    # UMAP plots
+    cols_umap = st.columns(2)
+    with cols_umap[0]:
+        try:
+            img = load_image_url(_join(BASE_URL, EXPECTED["img_umap_clusters"]))
+            st.image(img, caption="NEW: UMAP embedding colored by cluster")
+        except Exception as e:
+            st.error(f"Failed to load {EXPECTED['img_umap_clusters']}: {e}")
+    with cols_umap[1]:
+        try:
+            img = load_image_url(_join(BASE_URL, EXPECTED["img_umap_calltype"]))
+            st.image(img, caption="NEW: UMAP embedding colored by call_type")
+        except Exception as e:
+            st.error(f"Failed to load {EXPECTED['img_umap_calltype']}: {e}")
+
+    # Stability + clustergram
+    cols_stab = st.columns(2)
+    with cols_stab[0]:
+        try:
+            img = load_image_url(_join(BASE_URL, EXPECTED["img_coassoc"]))
+            st.image(img, caption="NEW: cluster co-association heatmap")
+        except Exception as e:
+            st.error(f"Failed to load {EXPECTED['img_coassoc']}: {e}")
+    with cols_stab[1]:
+        try:
+            img = load_image_url(_join(BASE_URL, EXPECTED["img_clustergram"]))
+            st.image(img, caption="NEW: clustergram (GMM vs k-means)")
+        except Exception as e:
+            st.error(f"Failed to load {EXPECTED['img_clustergram']}: {e}")
+
+    st.subheader("Feature importance for cluster separation")
+    try:
+        img = load_image_url(_join(BASE_URL, EXPECTED["img_importance"]))
+        st.image(img, caption="NEW: random-forest feature importance")
+    except Exception as e:
+        st.error(f"Failed to load {EXPECTED['img_importance']}: {e}")
+
+    st.markdown("""
+**Summary of the new plots:**
+
+- t-SNE and UMAP show that clusters form coherent islands in nonlinear embeddings.  
+- The co-association heatmap checks that clusters are stable across repeated GMM runs.  
+- The GMM vs k-means clustergram checks agreement between two different clustering
+  algorithms.  
+- The random-forest importance plot shows which acoustic features actually drive
+  the separation between clusters.
+""")
+
+# ------------------------------------------------------------------
+# Tab 6: Imputation
+# ------------------------------------------------------------------
+with tabs[5]:
     st.header("Imputation Techniques Used (and Options)")
 
     st.markdown("""
-**Why impute?** Acoustic extraction can produce missing values (short/noisy calls, measurement failures).
-Imputing before PCA/clustering avoids dropping rows and stabilizes components.
+Missing values can occur when acoustic extraction fails for very short/noisy calls.
+Imputing before PCA and clustering avoids dropping calls and stabilises the components.
 
-**Current approach in my R script:** simple **median imputation** per feature.
+**Current R approach in this project:** simple, robust **median imputation** per feature.
 """)
 
     st.code(r"""
-# R (current approach summarized)
+# R: median imputation then scaling
 X <- as.data.frame(features_numeric)
 for (j in seq_along(X)) {
   v <- X[[j]]
@@ -253,26 +520,34 @@ for (j in seq_along(X)) {
 }
 Z <- scale(as.matrix(X))
 """, language="r")
-    st.markdown("<div class='code-caption'>Median is robust and simple, but ignores correlations among features.</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='code-caption'>Median is simple and outlier-robust, but it ignores correlations among features.</div>",
+        unsafe_allow_html=True
+    )
 
-    st.subheader("Stronger options (possible future directions)")
+    st.subheader("Potential future upgrades")
     st.markdown("""
-- **KNN imputation**: fills a call’s missing values from acoustically similar calls.
-- **Iterative (multivariate) imputation**: models each feature using the others (regression-style).
-- **PCA-informed imputation** (`missMDA`): iterates PCA and reconstruction for coherent fills.
-- **MICE**: multiple imputations with predictive mean matching (good with mixed distributions).
+- **KNN imputation**: fills a call's missing values from acoustically similar calls.  
+- **Iterative/multivariate imputation**: models each feature using the others.  
+- **PCA-informed imputation** (`missMDA`): iterates PCA and reconstruction.  
+- **MICE**: multiple imputations with predictive mean matching.
 """)
 
-
-# Tab 6: Repro Tips
-with tabs[5]:
+# ------------------------------------------------------------------
+# Tab 7: Repro Tips
+# ------------------------------------------------------------------
+with tabs[6]:
     st.header("Reproducibility Tips")
     st.markdown("""
-- Pin R and package versions with **renv**  
-- Save intermediate selection_table and feature-screening results  
-- Log samplerate and clipping summaries  
-- Keep outputs in a versioned `preproc_outputs/` directory
+- Pin R and package versions with **renv**.  
+- Save intermediate EST objects and feature-screening tables.  
+- Log samplerate and clipping summaries.  
+- Keep all outputs in a versioned `preproc_outputs/` directory.  
+- Export embeddings and diagnostics so this app can always reflect the latest run.
 """)
 
 st.markdown("---")
-st.caption("Run locally:  `pip install streamlit pandas matplotlib requests`  →  `streamlit run parakeet_preproc_app.py`")
+st.caption(
+    "Run locally: `pip install streamlit pandas matplotlib requests altair` → "
+    "`streamlit run parakeet_preproc_app.py`"
+)
