@@ -277,6 +277,49 @@ with tabs[3]:
         unsafe_allow_html=True
     )
 
+    st.markdown("**Updated PCA cluster plot for the scaled-up dataset:**")
+
+    try:
+        img = load_image_url(_join(BASE_URL, EXPECTED["img_pca_new"]))
+        st.image(
+            img,
+            caption=(
+                "NEW: PCA of 28 acoustic features with 6 GMM clusters "
+                "(larger dataset, fixed PCs, G ∈ 2–8)"
+            )
+        )
+    except Exception as e:
+        st.error(f"Failed to load {EXPECTED['img_pca_new']}: {e}")
+
+
+        st.markdown("""
+### How this new PCA cluster plot differs from the old one
+
+The **old PCA cluster plot** was generated from a much smaller dataset and a narrower
+clustering search range. With fewer calls available, the Gaussian mixture model
+(GMM) could only reliably recover **2–3 coarse groups**, and the PCA structure
+appeared simpler and more compact.
+
+The **new PCA cluster plot** is based on a **scaled-up dataset** with more than
+27 call types and hundreds of call instances. Because the acoustic feature space
+is now better sampled, the GMM (searched over **G ∈ 2–8**) converges consistently
+on **6 stable clusters**. Several important differences emerge:
+
+- The PCA structure becomes **richer and more stratified**, revealing sub-clusters
+  that were previously invisible.
+- Call-type shapes (contact-like vs non-contact) align more cleanly with
+  **specific GMM clusters**.
+- Ellipses highlight **distinct covariance patterns**, especially for the
+  non-contact calls.
+- The larger dataset creates **clearer separation along PC1 and PC2**, reflecting
+  real acoustic variability rather than noise.
+
+In short:  
+the **old plot shows broad acoustic categories**, while the **new plot shows
+fine-grained, biologically interpretable subtypes** that only emerge when the
+dataset is large enough to support full GMM structure.
+""")
+        
     st.markdown("---")
     st.subheader("Feature table with posteriors")
     try:
